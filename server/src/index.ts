@@ -10,8 +10,24 @@ import { musicRouter } from './music/routes.js';
 const PORT = Number(process.env.PORT || 3001);
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 
+const allowedOrigins = CLIENT_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean);
+function isAllowedOrigin(origin?: string): boolean {
+  if (!origin) return true; // curl / health checks / same-origin
+  if (allowedOrigins.includes(origin)) return true;
+  if (origin.endsWith('.vercel.app')) return true;
+  if (origin.endsWith('.onrender.com')) return true;
+  if (origin.includes('localhost') || origin.includes('127.0.0.1')) return true;
+  return false;
+}
+
 const app = express();
-app.use(cors({ origin: CLIENT_ORIGIN.split(','), credentials: true }));
+app.use(cors({
+  origin: (origin, cb) => {
+    if (isAllowedOrigin(origin)) cb(null, origin || true);
+    else cb(null, false);
+  },
+  credentials: true,
+}));
 app.use(express.json());
 
 app.get('/health', (_req, res) => res.json({ ok: true, version: '1.0.0', uptime: process.uptime() }));
@@ -58,7 +74,11 @@ if (STATIC_DIR) {
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: CLIENT_ORIGIN.split(','), methods: ['GET','POST'] },
+  cors: {
+    origin: (origin: string | undefined, cb: (err: Error | null, ok: boolean) => void) => cb(null, isAllowedOrigin(origin)),
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
   pingInterval: 25000,
   pingTimeout: 20000,
 });

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useMusic } from '../music/MusicPlayerContext';
-import { searchMusic, fetchTopSongs, fetchLyrics, fmtTime } from '../music/api';
+import { searchMusic, fetchTopSongs, fetchLyrics, fmtTime, SERVER_URL } from '../music/api';
 import type { Song } from '../music/api';
 
 function SongCard({ song, list }: { song: Song; list: Song[] }) {
@@ -31,18 +31,35 @@ export function Music() {
   const [results, setResults] = useState<Song[]>([]);
   const [topSongs, setTopSongs] = useState<Song[]>([]);
   const [busy, setBusy] = useState(false);
+  const [topError, setTopError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lyrics, setLyrics] = useState<string | null>(null);
   const [lyricsOpen, setLyricsOpen] = useState(false);
 
-  useEffect(() => {
-    let alive = true;
+  const loadTopSongs = async () => {
     setBusy(true);
-    fetchTopSongs(20)
-      .then((s) => alive && setTopSongs(s))
-      .catch(() => {})
-      .finally(() => alive && setBusy(false));
-    return () => { alive = false; };
+    setTopError(null);
+    try {
+      const s = await fetchTopSongs(20);
+      setTopSongs(s);
+      if (!s.length) setTopError('No songs returned from server.');
+    } catch (e: any) {
+      const msg = e?.message || 'Failed to load top songs';
+      const isTimeout = msg.toLowerCase().includes('abort') || msg.toLowerCase().includes('timeout') || msg.includes('Failed to fetch');
+      if (!SERVER_URL) {
+        setTopError('Music server URL not configured. Set VITE_SERVER_URL in Vercel env vars and redeploy.');
+      } else if (isTimeout) {
+        setTopError(`Server is waking up (Render cold start ~30s). Retrying... If this persists, check ${SERVER_URL}/health`);
+      } else {
+        setTopError(`${msg} — server: ${SERVER_URL || '(relative /api)'}`);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTopSongs();
   }, []);
 
   const doSearch = async () => {
@@ -55,7 +72,9 @@ export function Music() {
       setResults(songs);
       if (!songs.length) setError(`No songs found for "${q}"`);
     } catch (e: any) {
-      setError(e.message || 'Search failed — is the game server running?');
+      const msg = e?.message || 'Search failed';
+      if (!SERVER_URL) setError(`${msg} — VITE_SERVER_URL not set. Configure in Vercel and redeploy.`);
+      else setError(`${msg} — ${SERVER_URL}`);
     } finally {
       setBusy(false);
     }
@@ -146,7 +165,20 @@ export function Music() {
                 ? results.map((s) => <SongCard key={s.id} song={s} list={results} />)
                 : topSongs.map((s) => <SongCard key={s.id} song={s} list={topSongs} />)}
               {!results.length && !topSongs.length && !busy && (
-                <div className="glass rounded-2xl p-6 text-center text-sm text-zinc-500">Could not load top songs. Check that the game server is running on port 3001.</div>
+                <div className="glass rounded-2xl p-6 text-center text-sm text-zinc-500">
+                  {topError ? (
+                    <>
+                      <div>{topError}</div>
+                      <button onClick={loadTopSongs} className="mt-3 px-4 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">↻ Retry</button>
+                      <div className="mt-2 text-xs text-zinc-600">Free Render servers sleep after 15 min — first load can take 30s to wake.</div>
+                    </>
+                  ) : (
+                    'No songs available.'
+                  )}
+                </div>
+              )}
+              {!results.length && !topSongs.length && busy && (
+                <div className="glass rounded-2xl p-6 text-center text-sm text-zinc-500">Loading from {SERVER_URL || 'server'}…<br /><span className="text-xs text-zinc-600">Render cold start may take 30s</span></div>
               )}
             </div>
           </section>
