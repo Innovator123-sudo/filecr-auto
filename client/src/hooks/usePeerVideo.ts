@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Socket } from 'socket.io-client';
 
-const SERVER_URL = (import.meta as any).env?.VITE_SERVER_URL || '';
+const SERVER_URL = (import.meta as any).env.VITE_SERVER_URL || '';
 
 interface PeerPlayer { id: string; nickname: string }
 

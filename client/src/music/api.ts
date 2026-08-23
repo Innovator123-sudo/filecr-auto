@@ -1,4 +1,4 @@
-const SERVER_URL = (import.meta as any).env?.VITE_SERVER_URL || '';
+const SERVER_URL = (import.meta as any).env.VITE_SERVER_URL || '';
 
 export interface Song {
   id: string;

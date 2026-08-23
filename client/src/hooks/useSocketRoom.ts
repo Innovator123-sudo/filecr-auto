@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 
-const SERVER_URL = (import.meta as any).env?.VITE_SERVER_URL || '';
+const SERVER_URL = (import.meta as any).env.VITE_SERVER_URL || '';
 
 export interface RoomState {
   code: string;
