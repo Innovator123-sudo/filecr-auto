@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { scrollbar-width: thin; scrollbar-color: #FF3B30 #1A1A1E; }
+html, body {
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  /* Mobile smoothness: no tap flash, no double-tap zoom lag, no pull-to-refresh mid-workout */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  overscroll-behavior-y: contain;
+}
+.mono { font-family: 'JetBrains Mono', monospace; }
+.glass { backdrop-filter: blur(16px); background: rgba(26,26,30,0.7); border: 1px solid rgba(255,255,255,0.08); }
+
+/* Notch / home-indicator safe areas when installed as PWA or in mobile browsers */
+.safe-x { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+.safe-y { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }

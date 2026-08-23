@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: pushup-pro-server
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: CLIENT_ORIGIN
+        value: https://pushup-pro.vercel.app,http://localhost:5173

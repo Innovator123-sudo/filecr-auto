@@ -1,0 +1,62 @@
+{
+  "elbowUpThresholdDeg": 155,
+  "elbowDownThresholdDeg": 104,
+  "hipStraightThresholdDeg": 160,
+  "kneeStraightThresholdDeg": 155,
+  "visibilityThreshold": 0.35,
+  "lowerBodyVisibilityThreshold": 0.36,
+  "minRepDurationMs": 320,
+  "smoothingAlpha": 0.22,
+  "fastSmoothingAlpha": 0.55,
+  "adaptive": {
+    "enabled": true,
+    "warmupReps": 4,
+    "upPercent": 0.80,
+    "downPercent": 0.20,
+    "minRangeDeg": 30
+  },
+  "formScoreWeights": { "depth": 0.35, "hip": 0.25, "knee": 0.25, "tempo": 0.15 },
+  "formWarnThreshold": 70,
+  "calibration": {
+    "plankDurationMs": 15000,
+    "exampleReps": 2,
+    "autoPersonalizeMarginDeg": 10
+  },
+  "pose": {
+    "modelAssetPath": "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+    "fullModelPath": "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task",
+    "fullModelLite16Path": "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",
+    "fullModelHeavyLatest": "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/latest/pose_landmarker_heavy.task",
+    "localModelPath": "/models/pose_landmarker_lite.task",
+    "githubCandidates": [
+      "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task",
+      "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task",
+      "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+      "https://cdn.jsdelivr.net/gh/google/mediapipe@master/mediapipe/modules/pose_landmark/pose_landmark_lite.task",
+      "/models/pose_landmarker_lite.task"
+    ],
+    "yoloFallback": "/models/yolov8s-pose.onnx",
+    "numPoses": 1,
+    "minPoseDetectionConfidence": 0.5,
+    "minPosePresenceConfidence": 0.45,
+    "minTrackingConfidence": 0.4,
+    "runningMode": "VIDEO",
+    "preferHeavyOnDesktop": true,
+    "preferLiteOnMobile": true
+  },
+  "fastMode": {
+    "enabled": true,
+    "velocityThresholdDegPerSec": 160,
+    "fastThresholdDropDeg": 8,
+    "minDurationMsNormal": 320,
+    "minDurationMsFast": 220,
+    "maxRps": 3.2,
+    "smoothingAlphaFast": 0.55,
+    "smoothingAlphaNormal": 0.22
+  },
+  "antiCheat": {
+    "maxSustainedRps": 3.2,
+    "sustainedWindowReps": 5,
+    "minInterRepMs": 250
+  }
+}

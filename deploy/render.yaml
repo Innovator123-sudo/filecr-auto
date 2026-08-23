@@ -1,0 +1,24 @@
+# Render Blueprint — single service serves web app + API + sockets.
+# Place a copy of this file at the REPO ROOT (or configure manually in the
+# Render dashboard using the values below) and create a Blueprint from it.
+services:
+  - type: web
+    name: pushup-pro
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build --workspace=client && npm run build --workspace=server
+    startCommand: node server/dist/index.js
+    healthCheckPath: /health
+    envVars:
+      # serve the built client from the same origin — no CORS, no baked URLs
+      - key: STATIC_DIR
+        value: client/dist
+      - key: CLIENT_ORIGIN
+        value: https://pushup-pro.onrender.com
+      # optional: better P2P behind strict NATs
+      # - key: TURN_URL
+      #   value: turn:openrelay.metered.ca:80
+      # - key: TURN_USER
+      #   value: openrelayproject
+      # - key: TURN_PASS
+      #   value: openrelayproject
