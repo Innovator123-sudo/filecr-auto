@@ -6,6 +6,9 @@ services:
     buildCommand: cd server && npm install && npm run build
     startCommand: cd server && npm start
     healthCheckPath: /health
+    autoDeploy: true
     envVars:
       - key: CLIENT_ORIGIN
-        value: https://client-gilt-three-81.vercel.app,https://client-kr5nowbnd-dfqwwq.vercel.app,http://localhost:5173
+        value: https://filecr-auto.vercel.app,https://client-gilt-three-81.vercel.app,https://client-kr5nowbnd-dfqwwq.vercel.app,http://localhost:5173
+      - key: NODE_VERSION
+        value: 20
