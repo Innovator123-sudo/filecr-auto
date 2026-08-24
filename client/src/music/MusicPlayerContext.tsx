@@ -83,6 +83,19 @@ export function MusicProvider({ children }: { children: ReactNode }) {
   const botRef = useRef(false);
   const historyRef = useRef<Set<string>>(new Set());
   const playedFromBotRef = useRef(0);
+  // anti-cascade guards: consecutive failed tracks, intentional-src-clear flag,
+  // and whether the YouTube iframe ACTUALLY started playing (autoplay is often blocked)
+  const errStreakRef = useRef(0);
+  const clearingAudioRef = useRef(false);
+  const ytPlayingRef = useRef(false);
+  // true only after the iframe reports an actual "playing" state — gates
+  // ended->next so spurious iframe events can't walk the queue
+  const ytPlayedOnceRef = useRef(false);
+  // Keep volume refs sync for YouTube unmute after autoplay (used in iframe onLoad + message handler)
+  const volumeRef = useRef(volume);
+  const mutedRef = useRef(isMuted);
+  volumeRef.current = volume;
+  mutedRef.current = isMuted;
 
   queueRef.current = queue;
   botRef.current = botMode;
@@ -123,23 +136,42 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     const vid = yt ? extractVideoId(song) : null;
     // YouTube path — use iframe, not <audio>
     if (yt && vid) {
-      // pause any saavn audio
+      // pause + properly detach any saavn audio.
+      // NOTE: a.src='' fires a bogus 'error' event which used to trigger
+      // the auto-skip cascade (\"go down to the last\" when playing Nepali
+      // search results). removeAttribute+load() is silent, and the
+      // clearingAudioRef flag double-guards it — kept async so the
+      // micro-task 'error' is still covered.
       if (audioRef.current) {
-        try { audioRef.current.pause(); } catch {}
-        audioRef.current.src = '';
+        const a = audioRef.current;
+        clearingAudioRef.current = true;
+        try { a.pause(); } catch {}
+        try { a.removeAttribute('src'); try { a.load(); } catch {} } catch {}
+        setTimeout(() => { clearingAudioRef.current = false; }, 800);
       }
+      // keep queue + current refs sync so a transient audio error
+      // doesn't see a stale queue and skip to the wrong item
+      currentRef.current = song;
       setYoutubeId(vid);
       setCurrentId(song.id);
       setProgress(0);
       setDuration(Number(song.duration) || 0);
       historyRef.current.add(song.id);
       if (botRef.current) playedFromBotRef.current += 1;
+      ytPlayingRef.current = false;
+      errStreakRef.current = 0;
       setLoading(false);
+      // optimistic UI — corrected by iframe onStateChange events (or the
+      // watchdog below if autoplay is blocked)
       setIsPlaying(true);
       return;
     }
     // Saavn path — use <audio>
+    ytPlayingRef.current = false;
+    errStreakRef.current = 0;
     setYoutubeId(null);
+    // keep currentRef sync for immediate next()/prev() correctness
+    currentRef.current = song;
     let audio = audioRef.current;
     if (!audio && typeof document !== 'undefined') {
       const a = document.createElement('audio');
@@ -225,12 +257,24 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     const onMeta = () => setDuration(audio.duration || 0);
     const onEnd = () => next();
     const onErr = () => {
+      // ignore the bogus error fired by an intentional src clear
+      // (YouTube switch) and any audio error while a YouTube iframe
+      // is active — the iframe has its own error handling
+      if (clearingAudioRef.current) return;
+      if (youtubeIdRef.current) return;
       setLoading(false);
       setIsPlaying(false);
-      // broken/unavailable track — skip forward (bot keeps going)
-      if (botRef.current || queueRef.current.length > 1) setTimeout(next, 300);
+      // skip forward on a broken track, but CAP the cascade: after 2
+      // consecutive failures stop skipping — otherwise one bad network
+      // state burns through 5+ queue entries without playing anything
+      // (this was the \"go down to the last\" bug for Nepali/YouTube)
+      if (errStreakRef.current >= 2) return;
+      if (botRef.current || queueRef.current.length > 1) {
+        errStreakRef.current += 1;
+        setTimeout(next, 300);
+      }
     };
-    const onPlay = () => { setIsPlaying(true); setLoading(false); };
+    const onPlay = () => { errStreakRef.current = 0; setIsPlaying(true); setLoading(false); };
     const onPause = () => setIsPlaying(false);
     const onWaiting = () => setLoading(true);
 
@@ -258,8 +302,22 @@ export function MusicProvider({ children }: { children: ReactNode }) {
   }, [next, isMuted, volume]);
 
   const playSong = useCallback((song: Song, list?: Song[]) => {
-    if (list?.length) setQueue(list);
-    else if (!queueRef.current.some((s) => s.id === song.id)) setQueue((prevQ) => [...prevQ, song]);
+    if (list?.length) {
+      setQueue(list);
+      // keep ref in sync immediately — startSong + the queued
+      // audio 'error' handler both read queueRef synchronously,
+      // and setState is async, so without this the queue looks
+      // stale and next() jumps to the wrong item (\"goes to last\")
+      queueRef.current = list;
+      currentRef.current = song;
+    } else if (!queueRef.current.some((s) => s.id === song.id)) {
+      const nxt = [...queueRef.current, song];
+      setQueue(nxt);
+      queueRef.current = nxt;
+      currentRef.current = song;
+    } else {
+      currentRef.current = song;
+    }
     startSong(song);
   }, [startSong]);
 
@@ -399,9 +457,10 @@ export function MusicProvider({ children }: { children: ReactNode }) {
       setProgress((p) => {
         const np = p + 1;
         if (np >= dur) {
-          // auto-next when track ends
+          // auto-next when track ends — ONLY if the iframe actually played;
+          // otherwise a blocked-autoplay iframe would skip through the queue
           clearInterval(id);
-          setTimeout(() => next(), 200);
+          if (ytPlayingRef.current) setTimeout(() => next(), 200);
           return dur;
         }
         return np;
@@ -410,22 +469,52 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(id);
   }, [youtubeId, isPlaying, current?.duration, next]);
 
+  // Watchdog: if the YouTube iframe never actually starts (mobile autoplay
+  // block), drop the optimistic isPlaying so the UI shows paused instead of
+  // silently skipping ahead. User taps ▶ → playVideo works with the gesture.
+  useEffect(() => {
+    if (!youtubeId) return;
+    ytPlayingRef.current = false;
+    ytPlayedOnceRef.current = false;
+    const t = setTimeout(() => {
+      if (!ytPlayingRef.current) setIsPlaying(false);
+    }, 6000);
+    return () => clearTimeout(t);
+  }, [youtubeId]);
+
   // Listen to YouTube iframe state changes (ended -> next)
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
       try {
         const data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
-        if (data?.event === 'onStateChange' && data?.info === 0) {
-          // 0 = ended
-          next();
+        const state = data?.event === 'onStateChange' ? data?.info
+          : data?.event === 'infoDelivery' ? data?.info?.playerState
+          : undefined;
+        if (state === 0) {
+          // 0 = ended — honour it only if this video ACTUALLY played;
+          // a fresh/reloading iframe can emit a spurious ended which would
+          // otherwise walk the whole queue down to the last entry
+          ytPlayingRef.current = false;
+          if (ytPlayedOnceRef.current) next();
         }
-        if (data?.event === 'onStateChange' && data?.info === 1) setIsPlaying(true);
-        if (data?.event === 'onStateChange' && data?.info === 2) setIsPlaying(false);
+        if (state === 1) {
+          ytPlayingRef.current = true; ytPlayedOnceRef.current = true; errStreakRef.current = 0; setIsPlaying(true); setLoading(false);
+          // Autoplay started muted — restore user's volume preference
+          // (must be done on 'playing' so the player accepts the command).
+          // Use postToYT helper so we go through the same channel.
+          if (mutedRef.current) {
+            postToYT('mute');
+          } else {
+            postToYT('unMute');
+            postToYT('setVolume', [Math.round(volumeRef.current * 100)]);
+          }
+        }
+        if (state === 2) { ytPlayingRef.current = false; setIsPlaying(false); }
       } catch {}
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
-  }, [next]);
+  }, [next, postToYT]);
 
   const value: PlayerState = {
     current,
@@ -452,18 +541,42 @@ export function MusicProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={value}>
       {children}
-      {/* Hidden YouTube iframe for Nepali/YouTube songs — unlimited via official embed (no decipher needed) */}
+      {/* Hidden YouTube iframe for Nepali/YouTube songs — unlimited via official embed (no decipher needed).
+          Starts muted for autoplay (Chrome blocks unmuted autoplay without a
+          same-tick gesture). Once the player reports \"playing\", we unmute
+          to restore the user's volume. Kept in-viewport 1×1 with opacity 0.01
+          — offscreen (-1000) is considered hidden and throttled by Chrome. */}
       {youtubeId && (
-        <div style={{ position: 'fixed', left: -1000, top: -1000, width: 1, height: 1, overflow: 'hidden', pointerEvents: 'none', opacity: 0 }} aria-hidden>
+        <div style={{ position: 'fixed', left: 0, top: 0, width: 1, height: 1, overflow: 'hidden', pointerEvents: 'none', opacity: 0.01 }} aria-hidden>
           <iframe
             ref={ytIframeRef}
             width="1"
             height="1"
-            src={`https://www.youtube.com/embed/${youtubeId}?enablejsapi=1&autoplay=1&playsinline=1&controls=0&rel=0&origin=${typeof window !== 'undefined' ? encodeURIComponent(window.location.origin) : ''}`}
+            src={`https://www.youtube.com/embed/${youtubeId}?enablejsapi=1&autoplay=1&mute=1&playsinline=1&controls=0&rel=0&origin=${typeof window !== 'undefined' ? encodeURIComponent(window.location.origin) : ''}`}
             title="YouTube audio"
             allow="autoplay; encrypted-media"
             allowFullScreen={false}
             frameBorder={0}
+            onLoad={(e) => {
+              // required handshake — without 'listening', YouTube never
+              // posts onStateChange events back to window.message
+              try {
+                const w = (e.currentTarget as HTMLIFrameElement).contentWindow;
+                w?.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), '*');
+                setTimeout(() => w?.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), '*'), 1200);
+                // If autoplay was muted, schedule an unmute once the player is ready.
+                // This re-uses the user's volume/muted preference. Must happen
+                // after the 'listening' handshake or setVolume is ignored.
+                setTimeout(() => {
+                  if (mutedRef.current) {
+                    w?.postMessage(JSON.stringify({ event: 'command', func: 'mute', args: [] }), '*');
+                  } else {
+                    w?.postMessage(JSON.stringify({ event: 'command', func: 'unMute', args: [] }), '*');
+                    w?.postMessage(JSON.stringify({ event: 'command', func: 'setVolume', args: [Math.round(volumeRef.current * 100)] }), '*');
+                  }
+                }, 1800);
+              } catch {}
+            }}
           />
         </div>
       )}
