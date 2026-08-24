@@ -13,6 +13,7 @@ export function OpponentStage({ landmarksRef, lastSeenAtRef, repCount, nickname,
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [ghostFresh, setGhostFresh] = useState(false);
+  const [needTapForSound, setNeedTapForSound] = useState(false);
 
   // cheap staleness check (well under 1 Hz of re-renders)
   useEffect(() => {
@@ -26,7 +27,19 @@ export function OpponentStage({ landmarksRef, lastSeenAtRef, repCount, nickname,
     const v = videoRef.current;
     if (!v) return;
     if (v.srcObject !== remoteStream) v.srcObject = remoteStream;
-    if (remoteStream) v.play().catch(() => {});
+    if (!remoteStream) return;
+    // start muted (autoplay-safe), then try to enable sound; if the browser
+    // blocks unmuted autoplay show a one-tap "tap for sound" button
+    v.muted = true;
+    v.play().then(() => {
+      if (remoteStream.getAudioTracks().length === 0) return; // video-only stream
+      v.muted = false;
+      return v.play();
+    }).catch(() => {
+      v.muted = true;
+      v.play().catch(() => {});
+      if (remoteStream.getAudioTracks().length > 0) setNeedTapForSound(true);
+    });
   }, [remoteStream]);
 
   return (
@@ -51,6 +64,19 @@ export function OpponentStage({ landmarksRef, lastSeenAtRef, repCount, nickname,
           {remoteStream ? '● LIVE CAM' : ghostFresh ? '◌ SKELETON SYNC' : '○ CONNECTING…'}
         </span>
       </div>
+
+      {remoteStream && needTapForSound && (
+        <button
+          onClick={() => {
+            const v = videoRef.current;
+            if (!v) return;
+            v.muted = false;
+            v.play().catch(() => {});
+            setNeedTapForSound(false);
+          }}
+          className="absolute top-12 right-3 z-10 px-3 py-1.5 rounded-full bg-black/80 border border-white/20 text-[11px] font-bold text-white"
+        >🔇 Tap for sound</button>
+      )}
 
       {!remoteStream && !ghostFresh && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-center px-4 pointer-events-none">

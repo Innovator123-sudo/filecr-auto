@@ -9,12 +9,15 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@distube/ytdl-core": "^4.16.12",
     "@types/crypto-js": "^4.2.2",
     "cors": "^2.8.5",
     "crypto-js": "^4.2.0",
     "express": "^4.19.2",
     "nanoid": "^5.0.7",
-    "socket.io": "^4.7.5"
+    "play-dl": "^1.9.7",
+    "socket.io": "^4.7.5",
+    "youtubei.js": "^18.0.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

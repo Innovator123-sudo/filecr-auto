@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useMusic } from '../music/MusicPlayerContext';
 import { searchMusic, fetchTopSongs, fetchLyrics, fmtTime, SERVER_URL } from '../music/api';
-import type { Song } from '../music/api';
+import type { Song, MusicLang } from '../music/api';
 
 function SongCard({ song, list }: { song: Song; list: Song[] }) {
   const { playSong, addToQueue, current } = useMusic();
@@ -28,6 +28,7 @@ function SongCard({ song, list }: { song: Song; list: Song[] }) {
 export function Music() {
   const { botMode, setBotMode, current, queue, isPlaying } = useMusic();
   const [query, setQuery] = useState('');
+  const [lang, setLang] = useState<MusicLang>('auto');
   const [results, setResults] = useState<Song[]>([]);
   const [topSongs, setTopSongs] = useState<Song[]>([]);
   const [busy, setBusy] = useState(false);
@@ -36,11 +37,11 @@ export function Music() {
   const [lyrics, setLyrics] = useState<string | null>(null);
   const [lyricsOpen, setLyricsOpen] = useState(false);
 
-  const loadTopSongs = async () => {
+  const loadTopSongs = async (l: MusicLang = lang) => {
     setBusy(true);
     setTopError(null);
     try {
-      const s = await fetchTopSongs(20);
+      const s = await fetchTopSongs(20, l);
       setTopSongs(s);
       if (!s.length) setTopError('No songs returned from server.');
     } catch (e: any) {
@@ -59,8 +60,8 @@ export function Music() {
   };
 
   useEffect(() => {
-    loadTopSongs();
-  }, []);
+    loadTopSongs(lang);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const doSearch = async () => {
     const q = query.trim();
@@ -68,9 +69,9 @@ export function Music() {
     setBusy(true);
     setError(null);
     try {
-      const songs = await searchMusic(q, 16);
+      const songs = await searchMusic(q, 16, lang);
       setResults(songs);
-      if (!songs.length) setError(`No songs found for "${q}"`);
+      if (!songs.length) setError(`No songs found for "${q}" (${lang})`);
     } catch (e: any) {
       const msg = e?.message || 'Search failed';
       if (!SERVER_URL) setError(`${msg} — VITE_SERVER_URL not set. Configure in Vercel and redeploy.`);
@@ -139,14 +140,26 @@ export function Music() {
           </div>
         )}
 
-        {/* SEARCH */}
+        {/* SEARCH + LANG */}
         <div className="mt-6">
+          <div className="flex flex-wrap gap-2 mb-3">
+            {(['auto','ne','hi','en'] as MusicLang[]).map(l => (
+              <button
+                key={l}
+                onClick={() => { setLang(l); if (topSongs.length) loadTopSongs(l); }}
+                className={`px-4 py-1.5 rounded-full text-xs font-black tracking-widest border transition ${lang===l ? 'bg-brand border-brand text-white' : 'bg-surface border-white/10 text-zinc-400 hover:border-white/20'}`}
+              >
+                {l==='auto' ? 'ALL' : l==='ne' ? '🇳🇵 NEPALI' : l==='hi' ? '🇮🇳 HINDI' : '🇺🇸 ENGLISH'}
+              </button>
+            ))}
+            <span className="ml-auto hidden sm:inline text-xs text-zinc-500 self-center">{lang==='ne' ? 'YouTube-first (Nepali)' : lang==='hi' ? 'Saavn 320kbps (Hindi)' : 'Unified JioSaavn + YouTube'}</span>
+          </div>
           <div className="flex gap-2">
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && doSearch()}
-              placeholder="Search any song, artist or album…"
+              placeholder={lang==='ne' ? 'Search Nepali — e.g. Sushant KC, Sajjan Raj Vaidya…' : lang==='hi' ? 'Search Hindi — e.g. Arijit Singh 2025…' : 'Search any song, artist or album…'}
               className="flex-1 bg-surface border border-white/10 rounded-full px-5 py-3 text-sm outline-none focus:border-brand/60 placeholder:text-zinc-600"
             />
             <button onClick={doSearch} disabled={busy} className="px-6 py-3 rounded-full bg-brand hover:bg-brand-dark disabled:opacity-50 font-bold text-sm">
@@ -169,7 +182,7 @@ export function Music() {
                   {topError ? (
                     <>
                       <div>{topError}</div>
-                      <button onClick={loadTopSongs} className="mt-3 px-4 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">↻ Retry</button>
+                      <button onClick={() => loadTopSongs()} className="mt-3 px-4 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">↻ Retry</button>
                       <div className="mt-2 text-xs text-zinc-600">Free Render servers sleep after 15 min — first load can take 30s to wake.</div>
                     </>
                   ) : (

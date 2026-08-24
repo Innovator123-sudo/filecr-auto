@@ -11,12 +11,15 @@ interface Opts {
   code?: string;
   players: PeerPlayer[];
   localStream: MediaStream | null;
+  audioStream?: MediaStream | null;
 }
 
 // Real P2P video between the two room players using the server's
 // webrtc:offer/answer/ice relay. Perfect-negotiation pattern:
 // deterministic polite/impolite roles from socket ids handle offer glare.
-export function usePeerVideo({ socket, connected, code, players, localStream }: Opts) {
+// Mic audio rides the same connection — pass audioStream once the user
+// enables their mic; addTrack fires negotiationneeded → auto renegotiate.
+export function usePeerVideo({ socket, connected, code, players, localStream, audioStream }: Opts) {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const makingOfferRef = useRef(false);
@@ -24,6 +27,8 @@ export function usePeerVideo({ socket, connected, code, players, localStream }: 
   const pendingIceRef = useRef<RTCIceCandidateInit[]>([]);
   const localStreamRef = useRef<MediaStream | null>(null);
   localStreamRef.current = localStream;
+  const audioStreamRef = useRef<MediaStream | null | undefined>(null);
+  audioStreamRef.current = audioStream;
 
   useEffect(() => {
     if (!connected || !socket || !code) return;
@@ -100,6 +105,11 @@ export function usePeerVideo({ socket, connected, code, players, localStream }: 
         for (const track of stream.getTracks()) pc.addTrack(track, stream);
       } else {
         pc.addTransceiver('video', { direction: 'recvonly' });
+      }
+      // mic (if already enabled) rides the same connection
+      const audio = audioStreamRef.current;
+      if (audio) {
+        for (const track of audio.getAudioTracks()) pc.addTrack(track, audio);
       }
       return pc;
     };
@@ -181,6 +191,19 @@ export function usePeerVideo({ socket, connected, code, players, localStream }: 
       } catch {}
     }
   }, [localStream]);
+
+  // mic enabled mid-battle → attach audio track; addTrack fires
+  // negotiationneeded → automatic renegotiation with the peer
+  useEffect(() => {
+    const pc = pcRef.current;
+    if (!pc || !audioStream) return;
+    if (!audioStream.getAudioTracks().length) return;
+    const hasAudioSender = pc.getSenders().some(s => s.track?.kind === 'audio');
+    if (hasAudioSender) return;
+    try {
+      for (const track of audioStream.getAudioTracks()) pc.addTrack(track, audioStream);
+    } catch {}
+  }, [audioStream]);
 
   return { remoteStream };
 }

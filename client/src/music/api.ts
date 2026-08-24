@@ -4,6 +4,9 @@ export const SERVER_URL = (import.meta as any).env.VITE_SERVER_URL || '';
 const COLD_START_TIMEOUT = 45000;
 const RETRY_DELAY_MS = 3000;
 
+export type MusicLang = 'ne' | 'hi' | 'en' | 'auto';
+export type MusicSource = 'auto' | 'saavn' | 'youtube' | 'all';
+
 export interface Song {
   id: string;
   title: string;
@@ -17,10 +20,21 @@ export interface Song {
   media_url: string;
   perma_url: string | null;
   has_lyrics: boolean;
+  // youtube extra (present when source=youtube)
+  source?: 'saavn' | 'youtube';
+  videoId?: string;
 }
 
 // Route through our server proxy: avoids CDN hotlink/CORS quirks and enables seeking
 export function streamUrl(song: Song): string {
+  // YouTube songs already point to our /api/music/yt/stream proxy (media_url = /api/music/yt/stream?id=...)
+  if (song.media_url.includes('/api/music/yt/stream')) {
+    return `${SERVER_URL}${song.media_url}`;
+  }
+  // Saavn detection via source field fallback
+  if ((song as any).source === 'youtube' && (song as any).videoId) {
+    return `${SERVER_URL}/api/music/yt/stream?id=${encodeURIComponent((song as any).videoId)}`;
+  }
   if (!SERVER_URL) return song.media_url; // fallback direct CDN if env not baked
   return `${SERVER_URL}/api/music/stream?url=${encodeURIComponent(song.media_url)}`;
 }
@@ -72,13 +86,18 @@ async function getJson<T>(path: string, timeoutMs = COLD_START_TIMEOUT, retries 
   throw new Error('Request failed after retries');
 }
 
-export async function searchMusic(query: string, limit = 16): Promise<Song[]> {
-  const d = await getJson<{ songs: Song[] }>(`/api/music/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+export async function searchMusic(query: string, limit = 16, lang: MusicLang = 'auto', source: MusicSource = 'auto'): Promise<Song[]> {
+  const d = await getJson<{ songs: Song[] }>(`/api/music/search?q=${encodeURIComponent(query)}&limit=${limit}&lang=${lang}&source=${source}`);
   return d.songs ?? [];
 }
 
-export async function fetchTopSongs(limit = 20): Promise<Song[]> {
-  const d = await getJson<{ songs: Song[] }>(`/api/music/top?limit=${limit}`);
+export async function searchYouTubeMusic(query: string, limit = 12, lang: MusicLang = 'auto'): Promise<Song[]> {
+  const d = await getJson<{ songs: Song[] }>(`/api/music/yt/search?q=${encodeURIComponent(query)}&limit=${limit}&lang=${lang}`);
+  return d.songs ?? [];
+}
+
+export async function fetchTopSongs(limit = 20, lang: MusicLang = 'auto', source: MusicSource = 'auto'): Promise<Song[]> {
+  const d = await getJson<{ songs: Song[] }>(`/api/music/top?limit=${limit}&lang=${lang}&source=${source}`);
   return d.songs ?? [];
 }
 

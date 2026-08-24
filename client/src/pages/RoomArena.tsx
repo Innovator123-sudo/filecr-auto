@@ -26,7 +26,11 @@ export function RoomArena() {
   });
   const { socket, room, connected, opponentRep, opponentLandmarksRef, lastGhostAtRef, joinRoom, setReady, sendRep, sendLandmarks } = useSocketRoom(code, nickname);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const { remoteStream } = usePeerVideo({ socket, connected, code, players: room?.players ?? [], localStream });
+  const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
+  const [micOn, setMicOn] = useState(false);
+  const [micError, setMicError] = useState<string | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const { remoteStream } = usePeerVideo({ socket, connected, code, players: room?.players ?? [], localStream, audioStream });
   const [myReps, setMyReps] = useState(0);
   const [myHistory, setMyHistory] = useState<number[]>([]);
   const [oppHistory, setOppHistory] = useState<number[]>([]);
@@ -64,6 +68,36 @@ export function RoomArena() {
     sendLandmarks(lm);
   };
 
+  // First tap requests mic permission and adds the track to the peer connection
+  // (auto-renegotiates). Later taps just mute/unmute the track — no renegotiation.
+  const toggleMic = async () => {
+    setMicError(null);
+    try {
+      if (!audioStream) {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error('Mic not supported here — open the https link');
+        }
+        const s = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+        });
+        audioStreamRef.current = s;
+        setAudioStream(s);
+        setMicOn(true);
+      } else {
+        const next = !micOn;
+        audioStream.getAudioTracks().forEach(t => { t.enabled = next; });
+        setMicOn(next);
+      }
+    } catch (e: any) {
+      setMicError(e?.message || 'Microphone access denied');
+    }
+  };
+
+  // release mic hardware when leaving the room
+  useEffect(() => () => {
+    audioStreamRef.current?.getTracks().forEach(t => t.stop());
+  }, []);
+
   const me = room?.players.find(p => p.nickname === nickname);
   const opp = room?.players.find(p => p.nickname !== nickname);
   const lead = myReps - opponentRep;
@@ -77,9 +111,17 @@ export function RoomArena() {
 
       <div className="max-w-6xl mx-auto">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
             <div className="px-3 py-1 rounded-full bg-white/10 mono text-sm">ROOM {code}</div>
             <button onClick={() => navigator.clipboard.writeText(shareLink)} className="px-3 py-1 rounded-full bg-brand text-white text-xs font-bold">Copy Link</button>
+            <button
+              onClick={toggleMic}
+              title={micOn ? 'Mute microphone' : 'Turn on microphone — your friend will hear you'}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition ${micOn ? 'bg-emerald-500 text-white shadow-[0_0_12px_rgba(34,197,94,0.5)]' : 'bg-white/10 text-zinc-300 hover:text-white'}`}
+            >
+              {micOn ? '🎤 Mic ON' : '🎤 Mic OFF'}
+            </button>
+            {micError && <span className="text-xs text-red-400">{micError}</span>}
             <span className="text-xs text-zinc-500 hidden md:inline">{shareLink}</span>
           </div>
           <div className="text-xs text-zinc-400">{room?.mode.toUpperCase()} {room?.mode==='target'? `· first to ${target}` : room?.mode==='timer'? `· ${room?.timerSec}s` : '· endless'}</div>

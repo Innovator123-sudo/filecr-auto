@@ -4,7 +4,6 @@ import CryptoJS from 'crypto-js';
 // cyberboysumanjay/JioSaavnAPI (helper.py DES decryption).
 const SEARCH_BASE_URL = 'https://www.jiosaavn.com/api.php?app_version=5.18.3&api_version=4&readable_version=5.18.3&v=79&_format=json&query=';
 const SONG_DETAILS_BASE_URL = 'https://www.jiosaavn.com/api.php?app_version=5.18.3&api_version=4&readable_version=5.18.3&v=79&_format=json&__call=song.getDetails&pids=';
-const TOP_SONGS_URL = 'https://www.jiosaavn.com/api.php?__call=webapi.get&token=8MT-LQlP35c_&type=playlist&p=1&n=30&includeMetaTags=0&ctx=web6dot0&api_version=4&_format=json&_marker=0';
 const ALBUM_DETAILS_BASE_URL = 'https://www.jiosaavn.com/api.php?__call=content.getAlbumDetails&_format=json&cc=in&_marker=0%3F_marker%3D0&albumid=';
 const PLAYLIST_DETAILS_BASE_URL = 'https://www.jiosaavn.com/api.php?__call=playlist.getDetails&_format=json&cc=in&_marker=0%3F_marker%3D0&listid=';
 const LYRICS_BASE_URL = 'https://www.jiosaavn.com/api.php?__call=lyrics.getLyrics&lyrics_id=';
@@ -159,13 +158,68 @@ export async function searchSongs(query: string, limit = 12): Promise<Song[]> {
   return songs.filter((s): s is Song => !!s);
 }
 
-// Musify topSongs(): official "Top songs" playlist via webapi.get token
+// Musify topSongs(): official JioSaavn playlists via webapi.get token.
+// Rotated so the mix spans Hindi chartbusters + cross-language trending,
+// with Nepali seeded in via search (JioSaavn has no public "Nepali top" playlist API).
+const TOP_PLAYLIST_TOKENS = [
+  '8MT-LQlP35c_',              // Dumdaar Hits — Bollywood evergreen
+  'NrIqFBlMsLjoTK7Cft7y8w__',  // Chartbusters 2026 — Hindi current
+  'I3kvhipIy73uCJW60TJk1Q__',  // Trending Today — mixed languages
+];
+const NEPALI_SEED_QUERIES = [
+  'nepali hits', 'new nepali song',
+  'sabin rai', 'sajjan raj vaidya',
+  'rajan raj siwakoti', 'samir shrestha', 'swopna suman',
+];
+
+function sampleN<T>(arr: T[], n: number): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a.slice(0, Math.max(0, n));
+}
+
 export async function getTopSongs(limit = 20): Promise<Song[]> {
   try {
-    const d = await saavnGet(TOP_SONGS_URL);
-    const list: any[] = d?.list ?? [];
-    const ids = list.map((s: any) => s.id).slice(0, limit);
-    const songs = await Promise.all(ids.map(getSong));
+    const token = TOP_PLAYLIST_TOKENS[Math.floor(Math.random() * TOP_PLAYLIST_TOKENS.length)];
+    const nepaliQuota = Math.min(Math.ceil(limit * 0.4), limit);
+    const trendingQuota = limit - nepaliQuota;
+
+    const [trending, nepali] = await Promise.all([
+      (async () => {
+        try {
+          const url = `https://www.jiosaavn.com/api.php?__call=webapi.get&token=${token}&type=playlist&p=1&n=${Math.max(limit, 30)}&includeMetaTags=0&ctx=web6dot0&api_version=4&_format=json&_marker=0`;
+          const d = await saavnGet(url);
+          return ((d?.list ?? []) as any[]).map((s) => String(s.id));
+        } catch {
+          return [] as string[];
+        }
+      })(),
+      (async () => {
+        try {
+          // autocomplete returns only ~3 songs per query — fan out over 3 seeds
+          const seeds = sampleN(NEPALI_SEED_QUERIES, Math.min(3, NEPALI_SEED_QUERIES.length));
+          const pools = await Promise.all(seeds.map(async (q) => {
+            try {
+              const res = await saavnGet(SEARCH_BASE_URL + encodeURIComponent(q) + '&__call=autocomplete.get');
+              return ((res?.songs?.data ?? []) as any[]).map((s) => String(s.id));
+            } catch {
+              return [] as string[];
+            }
+          }));
+          return Array.from(new Set(pools.flat()));
+        } catch {
+          return [] as string[];
+        }
+      })(),
+    ]);
+
+    const ids = [...sampleN(trending, trendingQuota), ...sampleN(nepali, nepaliQuota)];
+    const unique = Array.from(new Set(ids)).slice(0, limit);
+    if (!unique.length) return [];
+    const songs = await Promise.all(unique.map(getSong));
     return songs.filter((s): s is Song => !!s);
   } catch {
     return [];
