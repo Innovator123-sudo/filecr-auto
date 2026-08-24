@@ -13,3 +13,9 @@ deploy/server/
 
 cloudflared.exe
 *.pt
+
+.vercel
+# keep production env files for Vercel same-origin deploy
+!.env.production
+!client/.env.production
+!server/.env.example

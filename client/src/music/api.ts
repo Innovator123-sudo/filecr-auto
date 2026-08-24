@@ -1,7 +1,11 @@
-export const SERVER_URL = (import.meta as any).env.VITE_SERVER_URL || '';
+// VERCEL UNIFIED MODE: VITE_SERVER_URL is empty (same-origin /api/*) -> perfect on Vercel.
+// For Render separate backend, Vercel env should set VITE_SERVER_URL=https://...onrender.com
+export const SERVER_URL = (import.meta as any).env.VITE_SERVER_URL ?? '';
 
 // Render free tier sleeps after 15 min; first hit takes ~30s to wake up
-const COLD_START_TIMEOUT = 45000;
+// On Vercel same-origin, cold start is ~1s so we keep a shorter timeout in prod.
+const isVercelSameOrigin = !SERVER_URL && typeof window !== 'undefined' && window.location.hostname.endsWith('.vercel.app');
+const COLD_START_TIMEOUT = isVercelSameOrigin ? 15000 : 45000;
 const RETRY_DELAY_MS = 3000;
 
 export type MusicLang = 'ne' | 'hi' | 'en' | 'auto';
@@ -35,7 +39,12 @@ export function streamUrl(song: Song): string {
   if ((song as any).source === 'youtube' && (song as any).videoId) {
     return `${SERVER_URL}/api/music/yt/stream?id=${encodeURIComponent((song as any).videoId)}`;
   }
-  if (!SERVER_URL) return song.media_url; // fallback direct CDN if env not baked
+  // Vercel same-origin: go through proxy so Range/seek + CORS works
+  if (!SERVER_URL) {
+    // if media_url is already a proxy path, still prefix nothing (same origin)
+    if (song.media_url.startsWith('/')) return song.media_url;
+    return `/api/music/stream?url=${encodeURIComponent(song.media_url)}`;
+  }
   return `${SERVER_URL}/api/music/stream?url=${encodeURIComponent(song.media_url)}`;
 }
 
@@ -54,8 +63,9 @@ function isColdStartError(e: any): boolean {
 }
 
 async function getJson<T>(path: string, timeoutMs = COLD_START_TIMEOUT, retries = 1): Promise<T> {
-  if (!SERVER_URL && typeof window !== 'undefined' && !window.location.hostname.includes('localhost')) {
-    console.warn('[music api] VITE_SERVER_URL is empty at build time — fetch will use relative path and likely fail on Vercel. Set VITE_SERVER_URL in Vercel env and redeploy.');
+  // On Vercel same-origin (SERVER_URL === ''), relative /api/* is CORRECT – no warning needed.
+  if (!SERVER_URL && typeof window !== 'undefined' && !window.location.hostname.includes('localhost') && !window.location.hostname.endsWith('.vercel.app')) {
+    console.warn('[music api] VITE_SERVER_URL is empty and not on Vercel — fetch will use relative path.');
   }
   for (let attempt = 0; attempt <= retries; attempt++) {
     const ctrl = new AbortController();

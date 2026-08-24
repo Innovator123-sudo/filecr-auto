@@ -47,12 +47,11 @@ export function Music() {
     } catch (e: any) {
       const msg = e?.message || 'Failed to load top songs';
       const isTimeout = msg.toLowerCase().includes('abort') || msg.toLowerCase().includes('timeout') || msg.includes('Failed to fetch');
-      if (!SERVER_URL) {
-        setTopError('Music server URL not configured. Set VITE_SERVER_URL in Vercel env vars and redeploy.');
-      } else if (isTimeout) {
-        setTopError(`Server is waking up (Render cold start ~30s). Retrying... If this persists, check ${SERVER_URL}/health`);
+      const api = SERVER_URL || '(same-origin /api)';
+      if (isTimeout) {
+        setTopError(`Music API timed out (${api}). Retrying automatically…`);
       } else {
-        setTopError(`${msg} — server: ${SERVER_URL || '(relative /api)'}`);
+        setTopError(`${msg} — API: ${api}`);
       }
     } finally {
       setBusy(false);
@@ -74,8 +73,7 @@ export function Music() {
       if (!songs.length) setError(`No songs found for "${q}" (${lang})`);
     } catch (e: any) {
       const msg = e?.message || 'Search failed';
-      if (!SERVER_URL) setError(`${msg} — VITE_SERVER_URL not set. Configure in Vercel and redeploy.`);
-      else setError(`${msg} — ${SERVER_URL}`);
+      setError(`${msg} — API: ${SERVER_URL || '(same-origin /api)'}`);
     } finally {
       setBusy(false);
     }

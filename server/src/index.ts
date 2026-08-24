@@ -1,76 +1,11 @@
-import express from 'express';
 import http from 'http';
-import path from 'node:path';
-import cors from 'cors';
 import { Server } from 'socket.io';
+import { app, isAllowedOrigin } from './app.js';
 import { RoomManager } from './rooms/RoomManager.js';
 import { registerSignaling } from './signaling/relay.js';
-import { musicRouter } from './music/routes.js';
 
 const PORT = Number(process.env.PORT || 3001);
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
-
-const allowedOrigins = CLIENT_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean);
-function isAllowedOrigin(origin?: string): boolean {
-  if (!origin) return true; // curl / health checks / same-origin
-  if (allowedOrigins.includes(origin)) return true;
-  if (origin.endsWith('.vercel.app')) return true;
-  if (origin.endsWith('.onrender.com')) return true;
-  if (origin.includes('localhost') || origin.includes('127.0.0.1')) return true;
-  return false;
-}
-
-const app = express();
-app.use(cors({
-  origin: (origin, cb) => {
-    if (isAllowedOrigin(origin)) cb(null, origin || true);
-    else cb(null, false);
-  },
-  credentials: true,
-}));
-app.use(express.json());
-
-app.get('/health', (_req, res) => res.json({ ok: true, version: '1.0.0', uptime: process.uptime() }));
-// If someone opens the SERVER tunnel URL by mistake, send them to the web app instead
-// of showing Express's "Cannot GET /"
-app.get('/', (_req, res) => {
-  const appUrl = (process.env.CLIENT_ORIGIN || '').split(',')[0];
-  if (appUrl && !appUrl.includes('localhost')) return res.redirect(302, appUrl);
-  res.json({ ok: true, service: 'pushup-pro-game-server', hint: 'This is the API. Open the web app URL from run-tunnel.bat.' });
-});
-app.get('/rooms/:code', (req, res) => {
-  const room = roomManager.getRoom(req.params.code.toUpperCase());
-  if (!room) return res.status(404).json({ error: 'Room not found' });
-  res.json({ code: room.code, mode: room.mode, phase: room.phase, players: room.players.map(p=>({ nickname:p.nickname, ready:p.ready, repCount:p.repCount })) });
-});
-app.post('/api/turn-credentials', (_req, res) => {
-  // Issue short-lived TURN creds (metered.ca Open Relay uses static creds; this is a placeholder for HMAC mode)
-  // For free tier, clients use public STUN + metered.ca static TURN; server just returns config
-  res.json({
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:openrelay.metered.ca:80' },
-      // Add TURN when env TURN_URL/TURN_USER/TURN_PASS set
-      ...(process.env.TURN_URL ? [{ urls: process.env.TURN_URL, username: process.env.TURN_USER, credential: process.env.TURN_PASS }] : []),
-    ],
-  });
-});
-app.get('/api/leaderboard', (_req, res) => res.json([])); // Supabase stub
-
-// JioSaavn music (search / song / album / playlist / lyrics / stream proxy)
-app.use('/api/music', musicRouter);
-
-// ── Production single-service mode (optional) ──────────────────────────────
-// Set STATIC_DIR to a built client folder (client/dist) and this one service
-// serves BOTH the web app and the API — same origin, zero CORS, zero baked
-// URLs. Local dev is unaffected (STATIC_DIR unset).
-const STATIC_DIR = process.env.STATIC_DIR;
-if (STATIC_DIR) {
-  const staticAbs = path.resolve(STATIC_DIR);
-  app.use(express.static(staticAbs));
-  // SPA fallback: react-router paths like /bot/arena must serve index.html
-  app.get('*', (_req, res) => res.sendFile(path.join(staticAbs, 'index.html')));
-}
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -85,13 +20,18 @@ const io = new Server(server, {
 
 const roomManager = new RoomManager(io);
 
+// extra health for rooms
+app.get('/rooms/:code', (req, res) => {
+  const room = roomManager.getRoom(req.params.code.toUpperCase());
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  res.json({ code: room.code, mode: room.mode, phase: room.phase, players: room.players.map(p=>({ nickname:p.nickname, ready:p.ready, repCount:p.repCount })) });
+});
+
 io.on('connection', (socket) => {
-  // Rate limit per socket
   let eventCount = 0;
   const windowStart = Date.now();
   const allow = () => {
     eventCount += 1;
-    // 30 events/sec cap
     if (eventCount > 60 && Date.now() - windowStart < 1000) return false;
     if (Date.now() - windowStart > 1000) { eventCount = 0; }
     return true;
@@ -140,7 +80,6 @@ io.on('connection', (socket) => {
   });
 
   socket.on('landmarks', ({ code, landmarks }) => {
-    // P2P ghost is primary; server relay as fallback throttled
     if (!allow()) return;
     socket.to(code).emit('opponent_landmarks', landmarks);
   });
@@ -150,7 +89,6 @@ io.on('connection', (socket) => {
     if (room) io.to(room.code).emit('room_state', roomManager.toClientRoom(room));
   });
 
-  // WebRTC signaling relay
   registerSignaling(socket, io);
 
   socket.on('disconnect', () => {
@@ -159,4 +97,10 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, () => console.log(`[server] listening on :${PORT}, CORS origin=${CLIENT_ORIGIN}`));
+// Do not listen when running as Vercel serverless function
+if (!process.env.VERCEL) {
+  server.listen(PORT, () => console.log(`[server] listening on :${PORT}, CORS origin=${CLIENT_ORIGIN}`));
+}
+
+export { app, server, io };
+export default app;

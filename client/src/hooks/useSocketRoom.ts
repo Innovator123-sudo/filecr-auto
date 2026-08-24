@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 
-const SERVER_URL = (import.meta as any).env.VITE_SERVER_URL || '';
+// Vercel unified: empty => same-origin (Vercel function). Render fallback kept via env.
+// We also support VITE_SOCKET_URL override if someone wants separate WS host.
+const SERVER_URL = (import.meta as any).env.VITE_SERVER_URL ?? '';
+const SOCKET_URL = (import.meta as any).env.VITE_SOCKET_URL || SERVER_URL;
 
 export interface RoomState {
   code: string;
@@ -26,7 +29,10 @@ export function useSocketRoom(code?: string, nickname?: string) {
   const lastGhostAtRef = useRef(0);
 
   useEffect(() => {
-    const s = io(SERVER_URL, { transports: ['websocket'], autoConnect: true });
+    // On Vercel, use polling+websocket so it works even if websocket upgrade is blocked by serverless.
+    // Same-origin (SERVER_URL='') automatically hits Vercel's /socket.io rewrite -> /api.
+    const transports: any = SOCKET_URL ? ['websocket', 'polling'] as const : ['websocket', 'polling'] as const;
+    const s = io(SOCKET_URL, { transports, autoConnect: true, withCredentials: true });
     socketRef.current = s;
     s.on('connect', () => setConnected(true));
     s.on('disconnect', () => setConnected(false));
