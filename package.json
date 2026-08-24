@@ -8,6 +8,16 @@
     "build": "npm run build --workspace=client && npm run build --workspace=server",
     "test": "npm run test --workspace=client --if-present && npm run test --workspace=server --if-present"
   },
+  "dependencies": {
+    "@distube/ytdl-core": "^4.16.12",
+    "cors": "^2.8.5",
+    "crypto-js": "^4.2.0",
+    "express": "^4.19.2",
+    "nanoid": "^5.0.7",
+    "play-dl": "^1.9.7",
+    "socket.io": "^4.7.5",
+    "youtubei.js": "^18.0.0"
+  },
   "devDependencies": {
     "@vercel/node": "^7.0.0",
     "concurrently": "^8.2.2"
